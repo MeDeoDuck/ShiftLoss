@@ -16,8 +16,9 @@ from ts_benchmark.baselines.utils import (
     forecasting_data_provider,
     train_val_split,
     get_time_mark,
-    DBLoss
+    DBLoss,
 )
+from ts_benchmark.baselines.time_series_library.utils.shift_loss import DBLossWithShift
 from ts_benchmark.models.model_base import ModelBase, BatchMaker
 from ts_benchmark.utils.data_processing import split_time
 
@@ -37,7 +38,10 @@ DEFAULT_HYPER_PARAMS = {
     "adj_lr_in_batch": False,
     "parallel_strategy": None,
     "alpha": 0.2,
-    "beta": 0.5
+    "beta": 0.5,
+    "lambda_shift": 0.0,
+    "shift_k": 5,
+    "shift_mode": "mse",
 }
 
 
@@ -134,7 +138,24 @@ class DeepForecastingModelBase(ModelBase):
         elif self.config.loss == "MAE":
             criterion = nn.L1Loss()
         elif self.config.loss == "DBLoss":
-            criterion = DBLoss(self.config.alpha, self.config.beta)
+            base_loss = DBLoss(self.config.alpha, self.config.beta)
+            if getattr(self.config, "lambda_shift", 0.0) > 0:
+                criterion = DBLossWithShift(
+                    base_loss,
+                    lambda_shift=self.config.lambda_shift,
+                    k=self.config.shift_k,
+                    mode=self.config.shift_mode,
+                )
+            else:
+                criterion = base_loss
+        elif self.config.loss == "DBLossWithShift":
+            base_loss = DBLoss(self.config.alpha, self.config.beta)
+            criterion = DBLossWithShift(
+                base_loss,
+                lambda_shift=self.config.lambda_shift,
+                k=self.config.shift_k,
+                mode=self.config.shift_mode,
+            )
         else:
             criterion = nn.HuberLoss(delta=0.5)
 
