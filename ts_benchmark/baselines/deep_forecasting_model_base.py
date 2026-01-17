@@ -39,7 +39,7 @@ DEFAULT_HYPER_PARAMS = {
     "parallel_strategy": None,
     "alpha": 0.2,
     "beta": 0.5,
-    "lambda_shift": 0.0,
+    "lambda_shift": 0.1,
     "shift_k": 5,
     "shift_mode": "mse",
 }
