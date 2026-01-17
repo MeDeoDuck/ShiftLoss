@@ -19,7 +19,28 @@ def _ensure_three_dim(tensor: torch.Tensor) -> torch.Tensor:
         return tensor.unsqueeze(-1)
     if tensor.dim() == 3:
         return tensor
-    raise ValueError(f"Expected tensor with shape [B, T] or [B, T, C], got {tensor.shape}.")
+    raise ValueError(
+        f"Expected tensor with shape [B, T] or [B, T, C], got {tensor.shape}."
+    )
+
+
+def _normalize_time_first(tensor: torch.Tensor) -> Tuple[torch.Tensor, bool]:
+    """Return [B, T, C] tensor and whether a transpose was applied."""
+    tensor = _ensure_three_dim(tensor)
+    time_first = True
+    if tensor.size(1) < tensor.size(2):
+        tensor = tensor.transpose(1, 2)
+        time_first = False
+    return tensor, time_first
+
+
+def _ema_trend(tensor: torch.Tensor, alpha: float) -> torch.Tensor:
+    """Compute EMA trend along the time dimension."""
+    ema = torch.zeros_like(tensor)
+    ema[:, 0, :] = tensor[:, 0, :]
+    for t in range(1, tensor.size(1)):
+        ema[:, t, :] = alpha * tensor[:, t, :] + (1 - alpha) * ema[:, t - 1, :]
+    return ema
 
 
 def _shift_error(
@@ -100,19 +121,28 @@ class DBLossWithShift(nn.Module):
         lambda_shift: float = 0.1,
         k: int = 5,
         mode: str = "mse",
+        ema_alpha: float = 0.2,
     ) -> None:
         super().__init__()
         self.db_loss_module = db_loss_module
         self.lambda_shift = lambda_shift
         self.k = k
         self.mode = mode
+        self.ema_alpha = ema_alpha
 
     def _extract_trend(
         self,
         y_hat: torch.Tensor,
         y: torch.Tensor,
+        y_t_hat: Optional[torch.Tensor] = None,
+        y_t: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        if hasattr(self.db_loss_module, "decompose"):
+        if y_t_hat is not None and y_t is not None:
+            return y_t_hat, y_t
+
+        if hasattr(self.db_loss_module, "decompose") and callable(
+            getattr(self.db_loss_module, "decompose")
+        ):
             outputs = self.db_loss_module.decompose(y_hat, y)
             if isinstance(outputs, (tuple, list)) and len(outputs) == 4:
                 _, y_t_hat, _, y_t = outputs
@@ -120,9 +150,20 @@ class DBLossWithShift(nn.Module):
             if isinstance(outputs, (tuple, list)) and len(outputs) == 2:
                 return outputs[0], outputs[1]
             raise ValueError("db_loss_module.decompose must return 2 or 4 tensors.")
-        raise ValueError(
-            "Trend tensors were not provided and db_loss_module has no decompose method."
-        )
+
+        y_hat_norm, hat_time_first = _normalize_time_first(y_hat)
+        y_norm, y_time_first = _normalize_time_first(y)
+        if hat_time_first != y_time_first:
+            raise ValueError("Input tensors must share the same time dimension layout.")
+
+        y_t_hat = _ema_trend(y_hat_norm, self.ema_alpha)
+        y_t = _ema_trend(y_norm, self.ema_alpha)
+
+        if not hat_time_first:
+            y_t_hat = y_t_hat.transpose(1, 2)
+            y_t = y_t.transpose(1, 2)
+
+        return y_t_hat, y_t
 
     def forward(
         self,
@@ -139,7 +180,7 @@ class DBLossWithShift(nn.Module):
             db_loss = db_loss_output
 
         if y_t_hat is None or y_t is None:
-            y_t_hat, y_t = self._extract_trend(y_hat, y)
+            y_t_hat, y_t = self._extract_trend(y_hat, y, y_t_hat=y_t_hat, y_t=y_t)
 
         shift_loss, delta_star = compute_global_shift_loss_with_delta(
             y_t_hat, y_t, self.k, mode=self.mode
