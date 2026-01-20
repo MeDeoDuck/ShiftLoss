@@ -154,7 +154,7 @@ class DeepForecastingModelBase(ModelBase):
                 base_loss,
                 lambda_shift=self.config.lambda_shift,
                 k=self.config.shift_k,
-                mode=self.config.shift_mode,
+                mode="mae",
             )
         else:
             criterion = nn.HuberLoss(delta=0.5)
