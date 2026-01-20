@@ -41,7 +41,7 @@ DEFAULT_HYPER_PARAMS = {
     "beta": 0.5,
     "lambda_shift": 0.1,
     "shift_k": 5,
-    "shift_mode": "mse",
+    "shift_mode": "mae",
 }
 
 
@@ -154,7 +154,7 @@ class DeepForecastingModelBase(ModelBase):
                 base_loss,
                 lambda_shift=self.config.lambda_shift,
                 k=self.config.shift_k,
-                mode="mae",
+                mode=config.shift_mode,
             )
         else:
             criterion = nn.HuberLoss(delta=0.5)
