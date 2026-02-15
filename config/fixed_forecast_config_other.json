@@ -22,7 +22,7 @@
     },
 
     "evaluation_config" : {
-        "metrics": ["mae", "mse", "rmse", "mape", "smape", {"name": "mase", "seasonality": 1}, "wape", "msmape"],
+        "metrics":  ["mae", "mse", "rmse", "mape", "smape", "mase", "wape", "msmape", "DTW_norm", "TDI"],
         "strategy_args": {
             "strategy_name": "fixed_forecast",
             "horizon": 8,
@@ -37,7 +37,7 @@
 
     "report_config" : {
         "aggregate_type": "mean",
-        "report_metrics": ["mae", "mse", "rmse", "mape", "smape", "mase", "wape", "msmape"],
+         "report_metrics": ["mae", "mse", "rmse", "mape", "smape", "mase", "wape", "msmape", "DTW_norm", "TDI"],
         "fill_type": "mean_value",
         "null_value_threshold": "0.3"
     }
