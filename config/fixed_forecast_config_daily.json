@@ -22,7 +22,7 @@
     },
 
     "evaluation_config" : {
-         "metrics": ["mae", "mse", "rmse", "mape", "smape", {"name": "mase", "seasonality": 7}, "wape", "msmape", "DTW_norm", "TDI"],
+        "metrics": ["mae", "mse", "rmse", "mape", "smape", {"name": "mase", "seasonality": 7}, "wape", "msmape", "DTW_norm", "TDI"],
         "strategy_args": {
             "strategy_name": "fixed_forecast",
             "horizon": 14,
