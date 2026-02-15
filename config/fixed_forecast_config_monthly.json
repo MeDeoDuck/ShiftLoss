@@ -37,7 +37,8 @@
 
     "report_config" : {
         "aggregate_type": "mean",
- "report_metrics": ["mae", "mse", "rmse", "mape", "smape", "mase", "wape", "msmape", "DTW_norm", "TDI"],        "fill_type": "mean_value",
+        "report_metrics": ["mae", "mse", "rmse", "mape", "smape", "mase", "wape", "msmape", "DTW_norm", "TDI"],
+        "fill_type": "mean_value",
         "null_value_threshold": "0.3"
     }
 }
