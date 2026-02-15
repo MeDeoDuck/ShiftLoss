@@ -68,6 +68,237 @@ class DBLoss(nn.Module):
         trend_loss = trend_loss * (season_loss / (trend_loss + 1e-8)).detach()
         return self.beta * season_loss + (1 - self.beta) * trend_loss
 
+def compute_global_shift_loss_softmin(
+    y_hat: torch.Tensor,
+    y: torch.Tensor,
+    k: int,
+    mode: str = "mse",
+    tau: float = 10.0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Compute differentiable global shift loss using a soft-min over discrete shifts.
+
+    Args:
+        y_hat: Forecast tensor with shape [B, T] or [B, T, C].
+        y: Target tensor with shape [B, T] or [B, T, C].
+        k: Maximum absolute shift candidate. Clamped to T - 1.
+        mode: "mse" or "mae".
+        tau: Soft-min temperature (>0). Larger => closer to hard-min.
+
+    Returns:
+        (L_shift_soft, delta_soft, delta_star)
+    """
+    if y_hat.dim() not in (2, 3):
+        raise ValueError("y_hat must have shape [B, T] or [B, T, C].")
+    if y.dim() not in (2, 3):
+        raise ValueError("y must have shape [B, T] or [B, T, C].")
+
+    if y_hat.dim() == 2:
+        y_hat = y_hat.unsqueeze(-1)
+    if y.dim() == 2:
+        y = y.unsqueeze(-1)
+
+    if y_hat.shape != y.shape:
+        raise ValueError("y_hat and y must have the same shape.")
+
+    _, t, _ = y_hat.shape
+    if t < 1:
+        raise ValueError("T must be at least 1.")
+    if tau <= 0:
+        raise ValueError("tau must be > 0.")
+
+    k = int(k)
+    if k < 0:
+        raise ValueError("k must be >= 0.")
+    k = min(k, t - 1)
+
+    delta_values = torch.arange(-k, k + 1, device=y_hat.device, dtype=y_hat.dtype)
+    errors = []
+    for delta in range(-k, k + 1):
+        if delta >= 0:
+            a = y_hat[:, delta:t, :]
+            b = y[:, 0 : t - delta, :]
+        else:
+            d = -delta
+            a = y_hat[:, 0 : t - d, :]
+            b = y[:, d:t, :]
+
+        diff = a - b
+        if mode == "mse":
+            e = diff.pow(2).mean()
+        elif mode == "mae":
+            e = diff.abs().mean()
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
+        errors.append(e)
+
+    error_vec = torch.stack(errors, dim=0)
+    tau_tensor = error_vec.new_tensor(tau)
+    loss_shift = -(torch.logsumexp(-tau_tensor * error_vec, dim=0)) / tau_tensor
+
+    weights = torch.softmax(-tau_tensor * error_vec, dim=0)
+    delta_soft = torch.sum(weights * delta_values)
+    delta_star = delta_values[torch.argmin(error_vec)]
+    return loss_shift, delta_soft, delta_star
+
+
+def compute_windowed_shift_loss_softmin(
+    y_hat: torch.Tensor,
+    y: torch.Tensor,
+    k: int,
+    window_size: int,
+    mode: str = "mse",
+    tau: float = 10.0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Compute differentiable windowed shift loss using a soft-min over discrete shifts.
+
+    Each window estimates its own shift with a soft-min; the final loss is the
+    mean over windows.
+
+    Args:
+        y_hat: Forecast tensor with shape [B, T] or [B, T, C].
+        y: Target tensor with shape [B, T] or [B, T, C].
+        k: Maximum absolute shift candidate. Clamped to T - 1.
+        window_size: Window length for piecewise shift estimation.
+        mode: "mse" or "mae".
+        tau: Soft-min temperature (>0). Larger => closer to hard-min.
+
+    Returns:
+        (L_shift_windowed, mean_delta_soft, delta_star_per_window)
+    """
+    if y_hat.dim() not in (2, 3):
+        raise ValueError("y_hat must have shape [B, T] or [B, T, C].")
+    if y.dim() not in (2, 3):
+        raise ValueError("y must have shape [B, T] or [B, T, C].")
+
+    if y_hat.dim() == 2:
+        y_hat = y_hat.unsqueeze(-1)
+    if y.dim() == 2:
+        y = y.unsqueeze(-1)
+
+    if y_hat.shape != y.shape:
+        raise ValueError("y_hat and y must have the same shape.")
+
+    _, t, _ = y_hat.shape
+    if t < 1:
+        raise ValueError("T must be at least 1.")
+    if tau <= 0:
+        raise ValueError("tau must be > 0.")
+
+    k = int(k)
+    if k < 0:
+        raise ValueError("k must be >= 0.")
+    k = min(k, t - 1)
+
+    window_size = int(window_size)
+    if window_size < 1:
+        raise ValueError("window_size must be >= 1.")
+
+    tau_tensor = y_hat.new_tensor(tau)
+    window_losses = []
+    delta_soft_list = []
+    delta_star_list = []
+
+    for start in range(0, t, window_size):
+        end = min(start + window_size, t)
+        window_len = end - start
+        if window_len < 1:
+            continue
+
+        errors = []
+        delta_values = []
+        for delta in range(-k, k + 1):
+            if delta >= 0:
+                overlap_end = end - delta
+                if overlap_end <= start:
+                    continue
+                a = y_hat[:, start + delta : end, :]
+                b = y[:, start:overlap_end, :]
+            else:
+                d = -delta
+                overlap_end = end - d
+                if overlap_end <= start:
+                    continue
+                a = y_hat[:, start:overlap_end, :]
+                b = y[:, start + d : end, :]
+
+            diff = a - b
+            if mode == "mse":
+                e = diff.pow(2).mean()
+            elif mode == "mae":
+                e = diff.abs().mean()
+            else:
+                raise ValueError(f"Unsupported mode: {mode}")
+            errors.append(e)
+            delta_values.append(delta)
+
+        if not errors:
+            raise ValueError(
+                "No valid overlaps found for a window; check window_size and k."
+            )
+
+        error_vec = torch.stack(errors, dim=0)
+        delta_tensor = torch.tensor(
+            delta_values, device=y_hat.device, dtype=y_hat.dtype
+        )
+        loss_w = -(torch.logsumexp(-tau_tensor * error_vec, dim=0)) / tau_tensor
+        window_losses.append(loss_w)
+
+        weights = torch.softmax(-tau_tensor * error_vec, dim=0)
+        delta_soft_list.append(torch.sum(weights * delta_tensor))
+        delta_star_list.append(delta_tensor[torch.argmin(error_vec)])
+
+    loss_shift = torch.stack(window_losses, dim=0).mean()
+    mean_delta_soft = torch.stack(delta_soft_list, dim=0).mean()
+    delta_star_per_window = torch.stack(delta_star_list, dim=0)
+    return loss_shift, mean_delta_soft, delta_star_per_window
+
+
+class DBLossWithShift(nn.Module):
+    """DBLoss with differentiable windowed shift loss."""
+
+    def __init__(
+        self,
+        alpha: float,
+        beta: float,
+        lambda_shift: float = 1.0,
+        k: int = 5,
+        window_size: int = 32,
+        mode: str = "mse",
+        tau: float = 10.0,
+    ):
+        super().__init__()
+        self.dbloss = DBLoss(alpha, beta)
+        self.lambda_shift = lambda_shift
+        self.k = k
+        self.window_size = window_size
+        self.mode = mode
+        self.tau = tau
+
+    def forward(self, pred, target, return_logs: bool = False):
+        loss_db = self.dbloss(pred, target)
+        loss_shift, mean_delta_soft, delta_star_per_window = (
+            compute_windowed_shift_loss_softmin(
+                pred,
+                target,
+                self.k,
+                self.window_size,
+                mode=self.mode,
+                tau=self.tau,
+            )
+        )
+        total_loss = loss_db + self.lambda_shift * loss_shift
+        if not return_logs:
+            return total_loss
+        logs = {
+            "L_total": total_loss,
+            "L_DB": loss_db,
+            "L_shift": loss_shift,
+            "mean_delta_soft": mean_delta_soft,
+            "delta_star_per_window": delta_star_per_window,
+        }
+        return total_loss, logs
 
 def adjust_learning_rate(optimizer, epoch, args):
     # lr = args.learning_rate * (0.2 ** (epoch // 2))
