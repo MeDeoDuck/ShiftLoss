@@ -6,7 +6,6 @@ https://arxiv.org/pdf/2510.23672
 https://github.com/decisionintelligence/DBLoss
 
 ## Introduction
-<img width="803" height="204" alt="image" src="https://github.com/user-attachments/assets/3a78a35c-1206-4c02-b295-54759303954d" />
 
 DBLoss는 시계열 데이터 후반부 예측을 위해 추세성과 계절성으로 손실함수를 분리해 계산하고 있다. 하지만 예측한 시계열 데이터를 시각화해보면 모양과 추세만 예측할 뿐, 시간 지연은 발생하고 있는 것을 확인할 수 있다. 그래서 나는 여기에 시간 정렬을 추가한다면 더욱 정확한 데이터 예측이 되지 않을까라는 가설을 세웠다.
 
