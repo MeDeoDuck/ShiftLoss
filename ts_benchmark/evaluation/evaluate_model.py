@@ -3,6 +3,7 @@ import functools
 import json
 import logging
 import traceback
+import numpy as np
 from typing import Callable, Tuple, List, Generator
 
 import pandas as pd
@@ -163,7 +164,33 @@ def eval_model(
 def build_result_df(
     result_list: List, model_factory: ModelFactory, strategy: Strategy
 ) -> pd.DataFrame:
-    result_df = pd.DataFrame(result_list, columns=strategy.field_names)
+
+    normalized_results = []
+    expected_len = len(strategy.field_names)
+    for idx, result in enumerate(result_list):
+        row = result
+        if isinstance(row, np.ndarray):
+            row = row.tolist()
+
+        if isinstance(row, (list, tuple)) and len(row) == 1 and isinstance(
+            row[0], (list, tuple, np.ndarray)
+        ):
+            nested = row[0]
+            row = nested.tolist() if isinstance(nested, np.ndarray) else list(nested)
+
+        if isinstance(row, (list, tuple)) and len(row) == expected_len:
+            normalized_results.append(list(row))
+            continue
+
+        default_row = strategy.get_default_result()
+        default_row[strategy._field_name_to_idx[FieldNames.LOG_INFO]] = (
+            f"Malformed strategy result at index {idx}: "
+            f"type={type(result).__name__}, value={repr(result)[:500]}"
+        )
+        normalized_results.append(default_row)
+
+    result_df = pd.DataFrame(normalized_results, columns=strategy.field_names)
+
     if FieldNames.MODEL_PARAMS not in result_df.columns:
         # allow models to do hyper-param search and return independent model_params for each search
         result_df.insert(

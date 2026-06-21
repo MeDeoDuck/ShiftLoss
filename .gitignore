@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# Data / outputs (keep folder, ignore bulk data)
+dataset/*.csv
+result/**
+!result/.gitkeep

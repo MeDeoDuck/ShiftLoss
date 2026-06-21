@@ -325,6 +325,7 @@ class RollingForecast(ForecastingStrategy):
         single_series_results = np.mean(np.stack(all_test_results), axis=0).tolist()
 
         save_true_pred = self._get_scalar_config_value("save_true_pred", series_name)
+
         actual_data_encoded = (
             self._encode_data(all_rolling_actual) if save_true_pred else np.nan
         )
@@ -430,10 +431,14 @@ class RollingForecast(ForecastingStrategy):
         )
 
         save_true_pred = self._get_scalar_config_value("save_true_pred", series_name)
+
+ 
         actual_data_encoded = self._encode_data(targets) if save_true_pred else np.nan
         inference_data_encoded = (
             self._encode_data(all_predicts) if save_true_pred else np.nan
         )
+
+
 
         single_series_results += [
             series_name,
